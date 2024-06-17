@@ -2,12 +2,14 @@ package redhub
 
 import (
 	"bytes"
-	"crypto/tls"
 	"sync"
 	"time"
 
-	"github.com/sprappcom/redhub/pkg/resp"
+	"github.com/IceFireDB/redhub/pkg/resp"
+	"github.com/leslie-fei/gnet-tls"
+	"github.com/leslie-fei/gnet-tls/tls"
 	"github.com/panjf2000/gnet/v2"
+	"github.com/panjf2000/gnet/v2/pkg/pool/goroutine"
 )
 
 type Action int
@@ -34,7 +36,7 @@ type Options struct {
 	TCPNoDelay       gnet.TCPSocketOpt
 	SocketRecvBuffer int
 	SocketSendBuffer int
-	TLSConfig        *tls.Config // Add TLS configuration option
+	TLSConfig        *tls.Config
 }
 
 func NewRedHub(
@@ -76,7 +78,7 @@ func (rs *redHub) OnOpen(c gnet.Conn) (out []byte, action gnet.Action) {
 	defer rs.connSync.Unlock()
 	rs.redHubBufMap[c] = new(connBuffer)
 	rs.onOpened(&Conn{Conn: c})
-	return
+	return gnet.None
 }
 
 func (rs *redHub) OnClose(c gnet.Conn, err error) (action gnet.Action) {
@@ -84,7 +86,7 @@ func (rs *redHub) OnClose(c gnet.Conn, err error) (action gnet.Action) {
 	defer rs.connSync.Unlock()
 	delete(rs.redHubBufMap, c)
 	rs.onClosed(&Conn{Conn: c}, err)
-	return
+	return gnet.None
 }
 
 func (rs *redHub) OnTraffic(c gnet.Conn) gnet.Action {
@@ -130,36 +132,22 @@ func (rs *redHub) OnTraffic(c gnet.Conn) gnet.Action {
 }
 
 func ListenAndServe(addr string, options Options, rh *redHub) error {
-	var err error
-	if options.TLSConfig != nil {
-		err = gnet.Run(rh, addr,
-			gnet.WithMulticore(options.Multicore),
-			gnet.WithLockOSThread(options.LockOSThread),
-			gnet.WithReadBufferCap(options.ReadBufferCap),
-			gnet.WithLoadBalancing(options.LB),
-			gnet.WithNumEventLoop(options.NumEventLoop),
-			gnet.WithReusePort(options.ReusePort),
-			gnet.WithTicker(options.Ticker),
-			gnet.WithTCPKeepAlive(options.TCPKeepAlive),
-			gnet.WithTCPNoDelay(options.TCPNoDelay),
-			gnet.WithSocketRecvBuffer(options.SocketRecvBuffer),
-			gnet.WithSocketSendBuffer(options.SocketSendBuffer),
-			gnet.WithTLSConfig(options.TLSConfig),
-		)
-	} else {
-		err = gnet.Run(rh, addr,
-			gnet.WithMulticore(options.Multicore),
-			gnet.WithLockOSThread(options.LockOSThread),
-			gnet.WithReadBufferCap(options.ReadBufferCap),
-			gnet.WithLoadBalancing(options.LB),
-			gnet.WithNumEventLoop(options.NumEventLoop),
-			gnet.WithReusePort(options.ReusePort),
-			gnet.WithTicker(options.Ticker),
-			gnet.WithTCPKeepAlive(options.TCPKeepAlive),
-			gnet.WithTCPNoDelay(options.TCPNoDelay),
-			gnet.WithSocketRecvBuffer(options.SocketRecvBuffer),
-			gnet.WithSocketSendBuffer(options.SocketSendBuffer),
-		)
+	opts := []gnet.Option{
+		gnet.WithMulticore(options.Multicore),
+		gnet.WithLockOSThread(options.LockOSThread),
+		gnet.WithReadBufferCap(options.ReadBufferCap),
+		gnet.WithLoadBalancing(options.LB),
+		gnet.WithNumEventLoop(options.NumEventLoop),
+		gnet.WithReusePort(options.ReusePort),
+		gnet.WithTicker(options.Ticker),
+		gnet.WithTCPKeepAlive(options.TCPKeepAlive),
+		gnet.WithTCPNoDelay(options.TCPNoDelay),
+		gnet.WithSocketRecvBuffer(options.SocketRecvBuffer),
+		gnet.WithSocketSendBuffer(options.SocketSendBuffer),
 	}
-	return err
+
+	if options.TLSConfig != nil {
+		return gnettls.Run(rh, addr, options.TLSConfig, opts...)
+	}
+	return gnet.Run(rh, addr, opts...)
 }
