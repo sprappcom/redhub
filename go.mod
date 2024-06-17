@@ -1,4 +1,4 @@
-module github.com/IceFireDB/redhub
+module github.com/sprappcom/redhub
 
 go 1.16
 
