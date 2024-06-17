@@ -68,7 +68,7 @@ type connBuffer struct {
 
 func (rs *redHub) OnBoot(eng gnet.Engine) gnet.Action {
 	rs.eng = eng
-	return
+	return gnet.None
 }
 
 func (rs *redHub) OnOpen(c gnet.Conn) (out []byte, action gnet.Action) {
