@@ -9,7 +9,7 @@ import (
 	"github.com/leslie-fei/gnettls"
 	"github.com/leslie-fei/gnettls/tls"
 	"github.com/panjf2000/gnet/v2"
-	"github.com/panjf2000/gnet/v2/pkg/pool/goroutine"
+//	"github.com/panjf2000/gnet/v2/pkg/pool/goroutine"
 )
 
 type Action int
@@ -78,7 +78,7 @@ func (rs *redHub) OnOpen(c gnet.Conn) (out []byte, action gnet.Action) {
 	defer rs.connSync.Unlock()
 	rs.redHubBufMap[c] = new(connBuffer)
 	rs.onOpened(&Conn{Conn: c})
-	return gnet.None
+	return
 }
 
 func (rs *redHub) OnClose(c gnet.Conn, err error) (action gnet.Action) {
