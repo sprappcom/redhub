@@ -39,7 +39,7 @@ func main() {
         flag.BoolVar(&reusePort, "reusePort", true, "reusePort")
         flag.BoolVar(&pprofDebug, "pprofDebug", false, "open pprof")
         flag.StringVar(&pprofAddr, "pprofAddr", ":8888", "pprof address")
-        flag.BoolVar(&tlsEnabled, "tls", true, "enable TLS")
+        flag.BoolVar(&tlsEnabled, "tls", false, "enable TLS")
         flag.StringVar(&certFile, "cert", "server.crt", "TLS certificate file")
         flag.StringVar(&keyFile, "key", "server.key", "TLS key file")
         flag.Parse()
