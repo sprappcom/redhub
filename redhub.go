@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/sprappcom/redhub/pkg/resp"
-	"github.com/leslie-fei/gnet-tls"
-	"github.com/leslie-fei/gnet-tls/tls"
+	"github.com/leslie-fei/gnettls"
+	"github.com/leslie-fei/gnettls/tls"
 	"github.com/panjf2000/gnet/v2"
 	"github.com/panjf2000/gnet/v2/pkg/pool/goroutine"
 )
