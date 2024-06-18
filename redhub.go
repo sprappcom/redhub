@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/leslie-fei/gnettls"
-	"github.com/leslie-fei/gnettls/tls"
 	"github.com/panjf2000/gnet/v2"
 	"github.com/sprappcom/redhub/pkg/resp"
 	"github.com/tidwall/btree"
@@ -70,6 +68,25 @@ func (c *Conn) ReadCommand() (resp.Command, error) {
 		return cmd, nil
 	}
 	return resp.Command{}, fmt.Errorf("no command")
+}
+
+func (c *Conn) WriteError(msg string) {
+	c.buf.Write(resp.AppendError(nil, msg))
+}
+
+type Options struct {
+	Multicore        bool
+	LockOSThread     bool
+	ReadBufferCap    int
+	LB               gnet.LoadBalancing
+	NumEventLoop     int
+	ReusePort        bool
+	Ticker           bool
+	TCPKeepAlive     int
+	TCPNoDelay       gnet.TCPSocketOpt
+	SocketRecvBuffer int
+	SocketSendBuffer int
+	TLSConfig        *gnettls.Config
 }
 
 func NewRedHub(
@@ -176,7 +193,7 @@ func ListenAndServe(addr string, options Options, rh *redHub) error {
 		gnet.WithNumEventLoop(options.NumEventLoop),
 		gnet.WithReusePort(options.ReusePort),
 		gnet.WithTicker(options.Ticker),
-		gnet.WithTCPKeepAlive(options.TCPKeepAlive),
+		gnet.WithTCPKeepAlive(time.Duration(options.TCPKeepAlive) * time.Second),
 		gnet.WithTCPNoDelay(options.TCPNoDelay),
 		gnet.WithSocketRecvBuffer(options.SocketRecvBuffer),
 		gnet.WithSocketSendBuffer(options.SocketSendBuffer),
