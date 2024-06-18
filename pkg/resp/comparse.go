@@ -21,6 +21,7 @@ func (err *errProtocol) Error() string {
 
 
 type Command struct {
+	Raw []byte
 	Args [][]byte
 	Conn interface{} // Add this field to store the connection reference
 }
