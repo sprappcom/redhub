@@ -2,7 +2,6 @@ package redhub
 
 import (
 	"bytes"
-	"strings"
 	"sync"
 	"time"
 
