@@ -162,19 +162,22 @@ func ListenAndServe(addr string, options Options, rh *redHub) error {
 
 type PubSub struct {
 	mu     sync.RWMutex
-	chans  map[string][]*Conn
+	chans  map[string]map[*Conn]struct{}
 }
 
 func NewPubSub() *PubSub {
 	return &PubSub{
-		chans: make(map[string][]*Conn),
+		chans: make(map[string]map[*Conn]struct{}),
 	}
 }
 
 func (ps *PubSub) Subscribe(conn *Conn, channel string) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-	ps.chans[channel] = append(ps.chans[channel], conn)
+	if ps.chans[channel] == nil {
+		ps.chans[channel] = make(map[*Conn]struct{})
+	}
+	ps.chans[channel][conn] = struct{}{}
 	conn.Write(resp.AppendArray(nil, 3))
 	conn.Write(resp.AppendBulkString(nil, "subscribe"))
 	conn.Write(resp.AppendBulkString(nil, channel))
@@ -185,14 +188,12 @@ func (ps *PubSub) Subscribe(conn *Conn, channel string) {
 func (ps *PubSub) Unsubscribe(conn *Conn, channel string) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-	conns := ps.chans[channel]
-	for i, c := range conns {
-		if c == conn {
-			ps.chans[channel] = append(conns[:i], conns[i+1:]...)
-			break
-		}
+	conns, ok := ps.chans[channel]
+	if !ok {
+		return
 	}
-	if len(ps.chans[channel]) == 0 {
+	delete(conns, conn)
+	if len(conns) == 0 {
 		delete(ps.chans, channel)
 	}
 	conn.Write(resp.AppendArray(nil, 3))
@@ -205,7 +206,7 @@ func (ps *PubSub) Unsubscribe(conn *Conn, channel string) {
 func (ps *PubSub) Publish(channel, message string) {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
-	for _, conn := range ps.chans[channel] {
+	for conn := range ps.chans[channel] {
 		conn.Write(resp.AppendArray(nil, 3))
 		conn.Write(resp.AppendBulkString(nil, "message"))
 		conn.Write(resp.AppendBulkString(nil, channel))
