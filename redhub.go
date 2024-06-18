@@ -230,12 +230,12 @@ func (ps *PubSub) Unsubscribe(conn *Conn, channel string) {
 		if len(ps.chans[channel]) == 0 {
 			delete(ps.chans, channel)
 		}
+		conn.Write(resp.AppendArray(nil, 3))
+		conn.Write(resp.AppendBulkString(nil, "unsubscribe"))
+		conn.Write(resp.AppendBulkString(nil, channel))
+		conn.Write(resp.AppendInt(nil, int64(len(ps.chans[channel]))))
+		conn.Flush()
 	}
-	conn.Write(resp.AppendArray(nil, 3))
-	conn.Write(resp.AppendBulkString(nil, "unsubscribe"))
-	conn.Write(resp.AppendBulkString(nil, channel))
-	conn.Write(resp.AppendInt(nil, int64(len(ps.chans[channel]))))
-	conn.Flush()
 }
 
 func (ps *PubSub) Publish(channel, message string) {
