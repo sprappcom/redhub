@@ -175,6 +175,11 @@ func (ps *PubSub) Subscribe(conn *Conn, channel string) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	ps.chans[channel] = append(ps.chans[channel], conn)
+	conn.Write(resp.AppendArray(nil, 2))
+	conn.Write(resp.AppendBulkString(nil, "subscribe"))
+	conn.Write(resp.AppendBulkString(nil, channel))
+	conn.Write(resp.AppendInt(nil, len(ps.chans[channel])))
+	conn.Flush()
 }
 
 func (ps *PubSub) Unsubscribe(conn *Conn, channel string) {
@@ -196,7 +201,11 @@ func (ps *PubSub) Publish(channel, message string) {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
 	for _, conn := range ps.chans[channel] {
-		conn.AsyncWrite([]byte(message), nil)
+		conn.Write(resp.AppendArray(nil, 3))
+		conn.Write(resp.AppendBulkString(nil, "message"))
+		conn.Write(resp.AppendBulkString(nil, channel))
+		conn.Write(resp.AppendBulkString(nil, message))
+		conn.Flush()
 	}
 }
 
