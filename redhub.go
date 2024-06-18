@@ -2,6 +2,8 @@ package redhub
 
 import (
 	"bytes"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,25 +25,51 @@ const (
 
 type Conn struct {
 	gnet.Conn
+	buf bytes.Buffer
 }
 
-func (c *Conn) Unwrap() gnet.Conn {
-	return c.Conn
+func (c *Conn) WriteArray(count int) {
+	c.buf.Write(resp.AppendArray(nil, count))
 }
 
-type Options struct {
-	Multicore        bool
-	LockOSThread     bool
-	ReadBufferCap    int
-	LB               gnet.LoadBalancing
-	NumEventLoop     int
-	ReusePort        bool
-	Ticker           bool
-	TCPKeepAlive     time.Duration
-	TCPNoDelay       gnet.TCPSocketOpt
-	SocketRecvBuffer int
-	SocketSendBuffer int
-	TLSConfig        *tls.Config
+func (c *Conn) WriteBulkString(bulk string) {
+	c.buf.Write(resp.AppendBulkString(nil, bulk))
+}
+
+func (c *Conn) WriteString(str string) {
+	c.buf.Write(resp.AppendString(nil, str))
+}
+
+func (c *Conn) WriteInt(num int) {
+	c.buf.Write(resp.AppendInt(nil, int64(num)))
+}
+
+func (c *Conn) WriteNull() {
+	c.buf.Write(resp.AppendNull(nil))
+}
+
+func (c *Conn) Flush() error {
+	_, err := c.Conn.Write(c.buf.Bytes())
+	c.buf.Reset()
+	return err
+}
+
+func (c *Conn) ReadCommand() (resp.Command, error) {
+	data, err := c.Conn.Next(-1)
+	if err != nil {
+		return resp.Command{}, err
+	}
+	c.buf.Write(data)
+	cmds, _, err := resp.ReadCommands(c.buf.Bytes())
+	if err != nil {
+		return resp.Command{}, err
+	}
+	if len(cmds) > 0 {
+		cmd := cmds[0]
+		c.buf.Next(len(cmd.Raw))
+		return cmd, nil
+	}
+	return resp.Command{}, fmt.Errorf("no command")
 }
 
 func NewRedHub(
@@ -369,11 +397,10 @@ func (ps *PubSub) subscribe(conn *Conn, pattern bool, channel string) {
 	sconn, ok := ps.conns[conn]
 	if !ok {
 		ps.nextid++
-		dconn := conn.Detach()
 		sconn = &pubSubConn{
 			id:      ps.nextid,
 			conn:    conn,
-			dconn:   dconn,
+			dconn:   conn,
 			entries: make(map[*pubSubEntry]bool),
 		}
 		ps.conns[conn] = sconn
