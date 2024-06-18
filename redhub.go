@@ -2,6 +2,7 @@ package redhub
 
 import (
 	"bytes"
+	"strings"
 	"sync"
 	"time"
 
@@ -185,12 +186,19 @@ func (ps *PubSub) Subscribe(conn *Conn, channel string) {
 
 func (ps *PubSub) handleSubscription(conn *Conn) {
 	for {
-		cmd, err := conn.Read()
+		frame, err := conn.Next(-1)
 		if err != nil {
 			ps.Unsubscribe(conn, "")
 			return
 		}
 
+		cmds, _, err := resp.ReadCommands(frame)
+		if err != nil || len(cmds) == 0 {
+			ps.Unsubscribe(conn, "")
+			return
+		}
+
+		cmd := cmds[0]
 		switch strings.ToLower(string(cmd.Args[0])) {
 		case "unsubscribe":
 			ps.Unsubscribe(conn, string(cmd.Args[1]))
