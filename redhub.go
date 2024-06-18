@@ -88,7 +88,7 @@ type Options struct {
 	TCPNoDelay       gnet.TCPSocketOpt
 	SocketRecvBuffer int
 	SocketSendBuffer int
-	TLSConfig        *gnettls.Config
+	TLSConfig        *tls.Config
 }
 
 func NewRedHub(
