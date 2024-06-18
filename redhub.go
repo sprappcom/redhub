@@ -228,7 +228,6 @@ type pubSubConn struct {
 	id      uint64
 	mu      sync.Mutex
 	conn    *Conn
-	dconn   *Conn
 	entries map[*pubSubEntry]bool
 }
 
@@ -307,18 +306,18 @@ func (sconn *pubSubConn) writeMessage(pat bool, pchan, channel, msg string) {
 	sconn.mu.Lock()
 	defer sconn.mu.Unlock()
 	if pat {
-		sconn.dconn.WriteArray(4)
-		sconn.dconn.WriteBulkString("pmessage")
-		sconn.dconn.WriteBulkString(pchan)
-		sconn.dconn.WriteBulkString(channel)
-		sconn.dconn.WriteBulkString(msg)
+		sconn.conn.WriteArray(4)
+		sconn.conn.WriteBulkString("pmessage")
+		sconn.conn.WriteBulkString(pchan)
+		sconn.conn.WriteBulkString(channel)
+		sconn.conn.WriteBulkString(msg)
 	} else {
-		sconn.dconn.WriteArray(3)
-		sconn.dconn.WriteBulkString("message")
-		sconn.dconn.WriteBulkString(channel)
-		sconn.dconn.WriteBulkString(msg)
+		sconn.conn.WriteArray(3)
+		sconn.conn.WriteBulkString("message")
+		sconn.conn.WriteBulkString(channel)
+		sconn.conn.WriteBulkString(msg)
 	}
-	sconn.dconn.Flush()
+	sconn.conn.Flush()
 }
 
 func (sconn *pubSubConn) bgrunner(ps *PubSub) {
@@ -331,10 +330,10 @@ func (sconn *pubSubConn) bgrunner(ps *PubSub) {
 		delete(ps.conns, sconn.conn)
 		sconn.mu.Lock()
 		defer sconn.mu.Unlock()
-		sconn.dconn.Close()
+		sconn.conn.Close()
 	}()
 	for {
-		cmd, err := sconn.dconn.ReadCommand()
+		cmd, err := sconn.conn.ReadCommand()
 		if err != nil {
 			return
 		}
@@ -345,8 +344,8 @@ func (sconn *pubSubConn) bgrunner(ps *PubSub) {
 		case "psubscribe", "subscribe":
 			if len(cmd.Args) < 2 {
 				sconn.mu.Lock()
-				sconn.dconn.WriteError(fmt.Sprintf("ERR wrong number of arguments for '%s'", cmd.Args[0]))
-				sconn.dconn.Flush()
+				sconn.conn.WriteError(fmt.Sprintf("ERR wrong number of arguments for '%s'", cmd.Args[0]))
+				sconn.conn.Flush()
 				sconn.mu.Unlock()
 				continue
 			}
@@ -370,9 +369,9 @@ func (sconn *pubSubConn) bgrunner(ps *PubSub) {
 			}
 		case "quit":
 			sconn.mu.Lock()
-			sconn.dconn.WriteString("OK")
-			sconn.dconn.Flush()
-			sconn.dconn.Close()
+			sconn.conn.WriteString("OK")
+			sconn.conn.Flush()
+			sconn.conn.Close()
 			sconn.mu.Unlock()
 			return
 		case "ping":
@@ -383,21 +382,21 @@ func (sconn *pubSubConn) bgrunner(ps *PubSub) {
 				msg = string(cmd.Args[1])
 			default:
 				sconn.mu.Lock()
-				sconn.dconn.WriteError(fmt.Sprintf("ERR wrong number of arguments for '%s'", cmd.Args[0]))
-				sconn.dconn.Flush()
+				sconn.conn.WriteError(fmt.Sprintf("ERR wrong number of arguments for '%s'", cmd.Args[0]))
+				sconn.conn.Flush()
 				sconn.mu.Unlock()
 				continue
 			}
 			sconn.mu.Lock()
-			sconn.dconn.WriteArray(2)
-			sconn.dconn.WriteBulkString("pong")
-			sconn.dconn.WriteBulkString(msg)
-			sconn.dconn.Flush()
+			sconn.conn.WriteArray(2)
+			sconn.conn.WriteBulkString("pong")
+			sconn.conn.WriteBulkString(msg)
+			sconn.conn.Flush()
 			sconn.mu.Unlock()
 		default:
 			sconn.mu.Lock()
-			sconn.dconn.WriteError(fmt.Sprintf("ERR Can't execute '%s': only (P)SUBSCRIBE / (P)UNSUBSCRIBE / PING / QUIT are allowed in this context", cmd.Args[0]))
-			sconn.dconn.Flush()
+			sconn.conn.WriteError(fmt.Sprintf("ERR Can't execute '%s': only (P)SUBSCRIBE / (P)UNSUBSCRIBE / PING / QUIT are allowed in this context", cmd.Args[0]))
+			sconn.conn.Flush()
 			sconn.mu.Unlock()
 		}
 	}
@@ -419,7 +418,6 @@ func (ps *PubSub) subscribe(conn *Conn, pattern bool, channel string) {
 		sconn = &pubSubConn{
 			id:      ps.nextid,
 			conn:    conn,
-			dconn:   conn,
 			entries: make(map[*pubSubEntry]bool),
 		}
 		ps.conns[conn] = sconn
@@ -435,21 +433,21 @@ func (ps *PubSub) subscribe(conn *Conn, pattern bool, channel string) {
 	ps.chans.Set(entry)
 	sconn.entries[entry] = true
 
-	sconn.dconn.WriteArray(3)
+	sconn.conn.WriteArray(3)
 	if pattern {
-		sconn.dconn.WriteBulkString("psubscribe")
+		sconn.conn.WriteBulkString("psubscribe")
 	} else {
-		sconn.dconn.WriteBulkString("subscribe")
+		sconn.conn.WriteBulkString("subscribe")
 	}
-	sconn.dconn.WriteBulkString(channel)
+	sconn.conn.WriteBulkString(channel)
 	var count int
 	for entry := range sconn.entries {
 		if entry.pattern == pattern {
 			count++
 		}
 	}
-	sconn.dconn.WriteInt(count)
-	sconn.dconn.Flush()
+	sconn.conn.WriteInt(count)
+	sconn.conn.Flush()
 
 	if !ok {
 		go sconn.bgrunner(ps)
@@ -468,16 +466,16 @@ func (ps *PubSub) unsubscribe(conn *Conn, pattern, all bool, channel string) {
 			ps.chans.Delete(entry)
 			delete(sconn.entries, entry)
 		}
-		sconn.dconn.WriteArray(3)
+		sconn.conn.WriteArray(3)
 		if pattern {
-			sconn.dconn.WriteBulkString("punsubscribe")
+			sconn.conn.WriteBulkString("punsubscribe")
 		} else {
-			sconn.dconn.WriteBulkString("unsubscribe")
+			sconn.conn.WriteBulkString("unsubscribe")
 		}
 		if entry != nil {
-			sconn.dconn.WriteBulkString(entry.channel)
+			sconn.conn.WriteBulkString(entry.channel)
 		} else {
-			sconn.dconn.WriteNull()
+			sconn.conn.WriteNull()
 		}
 		var count int
 		for entry := range sconn.entries {
@@ -485,7 +483,7 @@ func (ps *PubSub) unsubscribe(conn *Conn, pattern, all bool, channel string) {
 				count++
 			}
 		}
-		sconn.dconn.WriteInt(count)
+		sconn.conn.WriteInt(count)
 	}
 	if all {
 		var entries []*pubSubEntry
@@ -509,5 +507,5 @@ func (ps *PubSub) unsubscribe(conn *Conn, pattern, all bool, channel string) {
 			}
 		}
 	}
-	sconn.dconn.Flush()
+	sconn.conn.Flush()
 }
