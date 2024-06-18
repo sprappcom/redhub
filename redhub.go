@@ -177,12 +177,14 @@ func (ps *PubSub) Subscribe(conn *Conn, channel string) {
 	if ps.chans[channel] == nil {
 		ps.chans[channel] = make(map[*Conn]struct{})
 	}
-	ps.chans[channel][conn] = struct{}{}
-	conn.Write(resp.AppendArray(nil, 3))
-	conn.Write(resp.AppendBulkString(nil, "subscribe"))
-	conn.Write(resp.AppendBulkString(nil, channel))
-	conn.Write(resp.AppendInt(nil, int64(len(ps.chans[channel])))) // Cast to int64
-	conn.Flush()
+	if _, exists := ps.chans[channel][conn]; !exists {
+		ps.chans[channel][conn] = struct{}{}
+		conn.Write(resp.AppendArray(nil, 3))
+		conn.Write(resp.AppendBulkString(nil, "subscribe"))
+		conn.Write(resp.AppendBulkString(nil, channel))
+		conn.Write(resp.AppendInt(nil, int64(len(ps.chans[channel])))) // Cast to int64
+		conn.Flush()
+	}
 }
 
 func (ps *PubSub) Unsubscribe(conn *Conn, channel string) {
