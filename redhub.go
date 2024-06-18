@@ -90,6 +90,7 @@ func (rs *redHub) OnClose(c gnet.Conn, err error) (action gnet.Action) {
 	return gnet.None
 }
 
+// redhub.go (in OnTraffic method)
 func (rs *redHub) OnTraffic(c gnet.Conn) gnet.Action {
 	rs.connSync.RLock()
 	defer rs.connSync.RUnlock()
@@ -119,6 +120,7 @@ func (rs *redHub) OnTraffic(c gnet.Conn) gnet.Action {
 			} else {
 				cb.command = cb.command[1:]
 			}
+			cmd.Conn = c // Set the connection reference here
 			out, status = rs.handler(cmd, out)
 			c.Write(out)
 			switch status {
