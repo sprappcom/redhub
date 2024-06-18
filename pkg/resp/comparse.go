@@ -19,13 +19,13 @@ func (err *errProtocol) Error() string {
 	return "Protocol error: " + err.msg
 }
 
-// Command represent a command
+
 type Command struct {
-	// Raw is a encoded RESP message.
-	Raw []byte
-	// Args is a series of arguments that make up the command.
 	Args [][]byte
+	Conn interface{} // Add this field to store the connection reference
 }
+
+
 
 func parseInt(b []byte) (int, bool) {
 	if len(b) == 1 && b[0] >= '0' && b[0] <= '9' {
