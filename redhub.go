@@ -172,7 +172,7 @@ func (rs *redHub) OnTraffic(c gnet.Conn) gnet.Action {
 			} else {
 				cb.command = cb.command[1:]
 			}
-			cmd.Conn = &Conn{Conn: c} // Correctly cast the connection
+			cmd.Conn = &Conn{Conn: c}
 			out, status = rs.handler(cmd, out)
 			c.Write(out)
 			switch status {
@@ -206,8 +206,6 @@ func ListenAndServe(addr string, options Options, rh *redHub) error {
 	}
 	return gnet.Run(rh, addr, opts...)
 }
-
-// PubSub related code
 
 type PubSub struct {
 	mu     sync.RWMutex
@@ -407,7 +405,7 @@ func (ps *PubSub) subscribe(conn *Conn, pattern bool, channel string) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
-	if (!ps.initd) {
+	if !ps.initd {
 		ps.conns = make(map[*Conn]*pubSubConn)
 		ps.chans = btree.New(byEntry)
 		ps.initd = true
