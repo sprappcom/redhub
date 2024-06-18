@@ -8,12 +8,6 @@ import (
 	"strings"
 )
 
-type Command struct {
-	Args [][]byte
-	Conn interface{} // Add this field to store the connection reference
-}
-
-
 // Type of RESP
 type Type byte
 
