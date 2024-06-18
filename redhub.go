@@ -9,6 +9,8 @@ import (
 	"github.com/leslie-fei/gnettls/tls"
 	"github.com/panjf2000/gnet/v2"
 	"github.com/sprappcom/redhub/pkg/resp"
+	"github.com/tidwall/btree"
+	"github.com/tidwall/match"
 )
 
 type Action int
@@ -162,69 +164,304 @@ func ListenAndServe(addr string, options Options, rh *redHub) error {
 
 type PubSub struct {
 	mu     sync.RWMutex
-	chans  map[string]map[*Conn]struct{}
+	nextid uint64
+	initd  bool
+	chans  *btree.BTree
+	conns  map[*Conn]*pubSubConn
 }
 
 func NewPubSub() *PubSub {
 	return &PubSub{
-		chans: make(map[string]map[*Conn]struct{}),
+		chans: btree.New(byEntry),
+		conns: make(map[*Conn]*pubSubConn),
 	}
+}
+
+type pubSubConn struct {
+	id      uint64
+	mu      sync.Mutex
+	conn    *Conn
+	dconn   *Conn
+	entries map[*pubSubEntry]bool
+}
+
+type pubSubEntry struct {
+	pattern bool
+	sconn   *pubSubConn
+	channel string
+}
+
+func byEntry(a, b interface{}) bool {
+	aa := a.(*pubSubEntry)
+	bb := b.(*pubSubEntry)
+	if !aa.pattern && bb.pattern {
+		return true
+	}
+	if aa.pattern && !bb.pattern {
+		return false
+	}
+	if aa.channel < bb.channel {
+		return true
+	}
+	if aa.channel > bb.channel {
+		return false
+	}
+	var aid uint64
+	var bid uint64
+	if aa.sconn != nil {
+		aid = aa.sconn.id
+	}
+	if bb.sconn != nil {
+		bid = bb.sconn.id
+	}
+	return aid < bid
 }
 
 func (ps *PubSub) Subscribe(conn *Conn, channel string) {
-	ps.mu.Lock()
-	defer ps.mu.Unlock()
-	if ps.chans[channel] == nil {
-		ps.chans[channel] = make(map[*Conn]struct{})
-	}
-	if _, exists := ps.chans[channel][conn]; !exists {
-		ps.chans[channel][conn] = struct{}{}
-	}
-	conn.Write(resp.AppendArray(nil, 3))
-	conn.Write(resp.AppendBulkString(nil, "subscribe"))
-	conn.Write(resp.AppendBulkString(nil, channel))
-	conn.Write(resp.AppendInt(nil, 1)) // Set the count to 1
-	conn.Flush()
+	ps.subscribe(conn, false, channel)
 }
 
-func (ps *PubSub) Unsubscribe(conn *Conn, channel string) {
-	ps.mu.Lock()
-	defer ps.mu.Unlock()
-	conns, ok := ps.chans[channel]
-	if !ok {
-		return
-	}
-	delete(conns, conn)
-	if len(conns) == 0 {
-		delete(ps.chans, channel)
-	}
-	conn.Write(resp.AppendArray(nil, 3))
-	conn.Write(resp.AppendBulkString(nil, "unsubscribe"))
-	conn.Write(resp.AppendBulkString(nil, channel))
-	conn.Write(resp.AppendInt(nil, int64(len(conns))))
-	conn.Flush()
+func (ps *PubSub) Psubscribe(conn *Conn, channel string) {
+	ps.subscribe(conn, true, channel)
 }
 
-func (ps *PubSub) Publish(channel, message string) {
+func (ps *PubSub) Publish(channel, message string) int {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
-	for conn := range ps.chans[channel] {
-		conn.Write(resp.AppendArray(nil, 3))
-		conn.Write(resp.AppendBulkString(nil, "message"))
-		conn.Write(resp.AppendBulkString(nil, channel))
-		conn.Write(resp.AppendBulkString(nil, message))
-		conn.Flush()
+	if !ps.initd {
+		return 0
+	}
+	var sent int
+	pivot := &pubSubEntry{pattern: false, channel: channel}
+	ps.chans.Ascend(pivot, func(item interface{}) bool {
+		entry := item.(*pubSubEntry)
+		if entry.channel != pivot.channel || entry.pattern != pivot.pattern {
+			return false
+		}
+		entry.sconn.writeMessage(entry.pattern, "", channel, message)
+		sent++
+		return true
+	})
+
+	pivot = &pubSubEntry{pattern: true}
+	ps.chans.Ascend(pivot, func(item interface{}) bool {
+		entry := item.(*pubSubEntry)
+		if match.Match(channel, entry.channel) {
+			entry.sconn.writeMessage(entry.pattern, entry.channel, channel, message)
+			sent++
+		}
+		return true
+	})
+
+	return sent
+}
+
+func (sconn *pubSubConn) writeMessage(pat bool, pchan, channel, msg string) {
+	sconn.mu.Lock()
+	defer sconn.mu.Unlock()
+	if pat {
+		sconn.dconn.WriteArray(4)
+		sconn.dconn.WriteBulkString("pmessage")
+		sconn.dconn.WriteBulkString(pchan)
+		sconn.dconn.WriteBulkString(channel)
+		sconn.dconn.WriteBulkString(msg)
+	} else {
+		sconn.dconn.WriteArray(3)
+		sconn.dconn.WriteBulkString("message")
+		sconn.dconn.WriteBulkString(channel)
+		sconn.dconn.WriteBulkString(msg)
+	}
+	sconn.dconn.Flush()
+}
+
+func (sconn *pubSubConn) bgrunner(ps *PubSub) {
+	defer func() {
+		ps.mu.Lock()
+		defer ps.mu.Unlock()
+		for entry := range sconn.entries {
+			ps.chans.Delete(entry)
+		}
+		delete(ps.conns, sconn.conn)
+		sconn.mu.Lock()
+		defer sconn.mu.Unlock()
+		sconn.dconn.Close()
+	}()
+	for {
+		cmd, err := sconn.dconn.ReadCommand()
+		if err != nil {
+			return
+		}
+		if len(cmd.Args) == 0 {
+			continue
+		}
+		switch strings.ToLower(string(cmd.Args[0])) {
+		case "psubscribe", "subscribe":
+			if len(cmd.Args) < 2 {
+				sconn.mu.Lock()
+				sconn.dconn.WriteError(fmt.Sprintf("ERR wrong number of arguments for '%s'", cmd.Args[0]))
+				sconn.dconn.Flush()
+				sconn.mu.Unlock()
+				continue
+			}
+			command := strings.ToLower(string(cmd.Args[0]))
+			for i := 1; i < len(cmd.Args); i++ {
+				if command == "psubscribe" {
+					ps.Psubscribe(sconn.conn, string(cmd.Args[i]))
+				} else {
+					ps.Subscribe(sconn.conn, string(cmd.Args[i]))
+				}
+			}
+		case "unsubscribe", "punsubscribe":
+			pattern := strings.ToLower(string(cmd.Args[0])) == "punsubscribe"
+			if len(cmd.Args) == 1 {
+				ps.unsubscribe(sconn.conn, pattern, true, "")
+			} else {
+				for i := 1; i < len(cmd.Args); i++ {
+					channel := string(cmd.Args[i])
+					ps.unsubscribe(sconn.conn, pattern, false, channel)
+				}
+			}
+		case "quit":
+			sconn.mu.Lock()
+			sconn.dconn.WriteString("OK")
+			sconn.dconn.Flush()
+			sconn.dconn.Close()
+			sconn.mu.Unlock()
+			return
+		case "ping":
+			var msg string
+			switch len(cmd.Args) {
+			case 1:
+			case 2:
+				msg = string(cmd.Args[1])
+			default:
+				sconn.mu.Lock()
+				sconn.dconn.WriteError(fmt.Sprintf("ERR wrong number of arguments for '%s'", cmd.Args[0]))
+				sconn.dconn.Flush()
+				sconn.mu.Unlock()
+				continue
+			}
+			sconn.mu.Lock()
+			sconn.dconn.WriteArray(2)
+			sconn.dconn.WriteBulkString("pong")
+			sconn.dconn.WriteBulkString(msg)
+			sconn.dconn.Flush()
+			sconn.mu.Unlock()
+		default:
+			sconn.mu.Lock()
+			sconn.dconn.WriteError(fmt.Sprintf("ERR Can't execute '%s': only (P)SUBSCRIBE / (P)UNSUBSCRIBE / PING / QUIT are allowed in this context", cmd.Args[0]))
+			sconn.dconn.Flush()
+			sconn.mu.Unlock()
+		}
 	}
 }
 
-func (rs *redHub) OnSubscribe(conn *Conn, channel string) {
-	rs.pubsub.Subscribe(conn, channel)
+func (ps *PubSub) subscribe(conn *Conn, pattern bool, channel string) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+
+	if !ps.initd {
+		ps.conns = make(map[*Conn]*pubSubConn)
+		ps.chans = btree.New(byEntry)
+		ps.initd = true
+	}
+
+	sconn, ok := ps.conns[conn]
+	if !ok {
+		ps.nextid++
+		dconn := conn.Detach()
+		sconn = &pubSubConn{
+			id:      ps.nextid,
+			conn:    conn,
+			dconn:   dconn,
+			entries: make(map[*pubSubEntry]bool),
+		}
+		ps.conns[conn] = sconn
+	}
+	sconn.mu.Lock()
+	defer sconn.mu.Unlock()
+
+	entry := &pubSubEntry{
+		pattern: pattern,
+		channel: channel,
+		sconn:   sconn,
+	}
+	ps.chans.Set(entry)
+	sconn.entries[entry] = true
+
+	sconn.dconn.WriteArray(3)
+	if pattern {
+		sconn.dconn.WriteBulkString("psubscribe")
+	} else {
+		sconn.dconn.WriteBulkString("subscribe")
+	}
+	sconn.dconn.WriteBulkString(channel)
+	var count int
+	for entry := range sconn.entries {
+		if entry.pattern == pattern {
+			count++
+		}
+	}
+	sconn.dconn.WriteInt(count)
+	sconn.dconn.Flush()
+
+	if !ok {
+		go sconn.bgrunner(ps)
+	}
 }
 
-func (rs *redHub) OnUnsubscribe(conn *Conn, channel string) {
-	rs.pubsub.Unsubscribe(conn, channel)
-}
+func (ps *PubSub) unsubscribe(conn *Conn, pattern, all bool, channel string) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	sconn := ps.conns[conn]
+	sconn.mu.Lock()
+	defer sconn.mu.Unlock()
 
-func (rs *redHub) OnPublish(channel, message string) {
-	rs.pubsub.Publish(channel, message)
+	removeEntry := func(entry *pubSubEntry) {
+		if entry != nil {
+			ps.chans.Delete(entry)
+			delete(sconn.entries, entry)
+		}
+		sconn.dconn.WriteArray(3)
+		if pattern {
+			sconn.dconn.WriteBulkString("punsubscribe")
+		} else {
+			sconn.dconn.WriteBulkString("unsubscribe")
+		}
+		if entry != nil {
+			sconn.dconn.WriteBulkString(entry.channel)
+		} else {
+			sconn.dconn.WriteNull()
+		}
+		var count int
+		for entry := range sconn.entries {
+			if entry.pattern == pattern {
+				count++
+			}
+		}
+		sconn.dconn.WriteInt(count)
+	}
+	if all {
+		var entries []*pubSubEntry
+		for entry := range sconn.entries {
+			if entry.pattern == pattern {
+				entries = append(entries, entry)
+			}
+		}
+		if len(entries) == 0 {
+			removeEntry(nil)
+		} else {
+			for _, entry := range entries {
+				removeEntry(entry)
+			}
+		}
+	} else {
+		for entry := range sconn.entries {
+			if entry.pattern == pattern && entry.channel == channel {
+				removeEntry(entry)
+				break
+			}
+		}
+	}
+	sconn.dconn.Flush()
 }
