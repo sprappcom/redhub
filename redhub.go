@@ -181,30 +181,6 @@ func (ps *PubSub) Subscribe(conn *Conn, channel string) {
 	conn.Write(resp.AppendBulkString(nil, channel))
 	conn.Write(resp.AppendInt(nil, int64(len(ps.chans[channel])))) // Cast to int64
 	conn.Flush()
-	go ps.handleSubscription(conn)
-}
-
-func (ps *PubSub) handleSubscription(conn *Conn) {
-	for {
-		frame, err := conn.Next(-1)
-		if err != nil {
-			ps.Unsubscribe(conn, "")
-			return
-		}
-
-		cmds, _, err := resp.ReadCommands(frame)
-		if err != nil || len(cmds) == 0 {
-			ps.Unsubscribe(conn, "")
-			return
-		}
-
-		cmd := cmds[0]
-		switch strings.ToLower(string(cmd.Args[0])) {
-		case "unsubscribe":
-			ps.Unsubscribe(conn, string(cmd.Args[1]))
-			return
-		}
-	}
 }
 
 func (ps *PubSub) Unsubscribe(conn *Conn, channel string) {
