@@ -191,7 +191,7 @@ func (ps *PubSub) Publish(channel, message string) {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
 	for _, conn := range ps.chans[channel] {
-		conn.AsyncWrite([]byte(message))
+		conn.AsyncWrite([]byte(message), nil)
 	}
 }
 
