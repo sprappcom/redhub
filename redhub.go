@@ -185,32 +185,21 @@ func (ps *PubSub) Subscribe(conn *Conn, channel string) {
 func (ps *PubSub) Unsubscribe(conn *Conn, channel string) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-	if channel == "" {
-		for ch, conns := range ps.chans {
-			for i, c := range conns {
-				if c == conn {
-					ps.chans[ch] = append(conns[:i], conns[i+1:]...)
-					break
-				}
-			}
+	conns := ps.chans[channel]
+	for i, c := range conns {
+		if c == conn {
+			ps.chans[channel] = append(conns[:i], conns[i+1:]...)
+			break
 		}
-	} else {
-		conns := ps.chans[channel]
-		for i, c := range conns {
-			if c == conn {
-				ps.chans[channel] = append(conns[:i], conns[i+1:]...)
-				break
-			}
-		}
-		if len(ps.chans[channel]) == 0 {
-			delete(ps.chans, channel)
-		}
-		conn.Write(resp.AppendArray(nil, 3))
-		conn.Write(resp.AppendBulkString(nil, "unsubscribe"))
-		conn.Write(resp.AppendBulkString(nil, channel))
-		conn.Write(resp.AppendInt(nil, int64(len(ps.chans[channel]))))
-		conn.Flush()
 	}
+	if len(ps.chans[channel]) == 0 {
+		delete(ps.chans, channel)
+	}
+	conn.Write(resp.AppendArray(nil, 3))
+	conn.Write(resp.AppendBulkString(nil, "unsubscribe"))
+	conn.Write(resp.AppendBulkString(nil, channel))
+	conn.Write(resp.AppendInt(nil, int64(len(ps.chans[channel]))))
+	conn.Flush()
 }
 
 func (ps *PubSub) Publish(channel, message string) {
