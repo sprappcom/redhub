@@ -162,22 +162,22 @@ func ListenAndServe(addr string, options Options, rh *redHub) error {
 
 type PubSub struct {
 	mu     sync.RWMutex
-	chans  map[string][]Conn
+	chans  map[string][]*Conn
 }
 
 func NewPubSub() *PubSub {
 	return &PubSub{
-		chans: make(map[string][]Conn),
+		chans: make(map[string][]*Conn),
 	}
 }
 
-func (ps *PubSub) Subscribe(conn Conn, channel string) {
+func (ps *PubSub) Subscribe(conn *Conn, channel string) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	ps.chans[channel] = append(ps.chans[channel], conn)
 }
 
-func (ps *PubSub) Unsubscribe(conn Conn, channel string) {
+func (ps *PubSub) Unsubscribe(conn *Conn, channel string) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	conns := ps.chans[channel]
@@ -200,11 +200,11 @@ func (ps *PubSub) Publish(channel, message string) {
 	}
 }
 
-func (rs *redHub) OnSubscribe(conn Conn, channel string) {
+func (rs *redHub) OnSubscribe(conn *Conn, channel string) {
 	rs.pubsub.Subscribe(conn, channel)
 }
 
-func (rs *redHub) OnUnsubscribe(conn Conn, channel string) {
+func (rs *redHub) OnUnsubscribe(conn *Conn, channel string) {
 	rs.pubsub.Unsubscribe(conn, channel)
 }
 
