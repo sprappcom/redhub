@@ -5,11 +5,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sprappcom/redhub/pkg/resp"
 	"github.com/leslie-fei/gnettls"
 	"github.com/leslie-fei/gnettls/tls"
 	"github.com/panjf2000/gnet/v2"
-//	"github.com/panjf2000/gnet/v2/pkg/pool/goroutine"
+	"github.com/sprappcom/redhub/pkg/resp"
 )
 
 type Action int
@@ -50,6 +49,7 @@ func NewRedHub(
 		onOpened:     onOpened,
 		onClosed:     onClosed,
 		handler:      handler,
+		pubsub:       NewPubSub(),
 	}
 }
 
@@ -61,6 +61,7 @@ type redHub struct {
 	handler      func(cmd resp.Command, out []byte) ([]byte, Action)
 	redHubBufMap map[gnet.Conn]*connBuffer
 	connSync     sync.RWMutex
+	pubsub       *PubSub
 }
 
 type connBuffer struct {
@@ -150,4 +151,58 @@ func ListenAndServe(addr string, options Options, rh *redHub) error {
 		return gnettls.Run(rh, addr, options.TLSConfig, opts...)
 	}
 	return gnet.Run(rh, addr, opts...)
+}
+
+// PubSub related code
+
+type PubSub struct {
+	mu     sync.RWMutex
+	chans  map[string][]Conn
+}
+
+func NewPubSub() *PubSub {
+	return &PubSub{
+		chans: make(map[string][]Conn),
+	}
+}
+
+func (ps *PubSub) Subscribe(conn Conn, channel string) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.chans[channel] = append(ps.chans[channel], conn)
+}
+
+func (ps *PubSub) Unsubscribe(conn Conn, channel string) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	conns := ps.chans[channel]
+	for i, c := range conns {
+		if c == conn {
+			ps.chans[channel] = append(conns[:i], conns[i+1:]...)
+			break
+		}
+	}
+	if len(ps.chans[channel]) == 0 {
+		delete(ps.chans, channel)
+	}
+}
+
+func (ps *PubSub) Publish(channel, message string) {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	for _, conn := range ps.chans[channel] {
+		conn.AsyncWrite([]byte(message))
+	}
+}
+
+func (rs *redHub) OnSubscribe(conn Conn, channel string) {
+	rs.pubsub.Subscribe(conn, channel)
+}
+
+func (rs *redHub) OnUnsubscribe(conn Conn, channel string) {
+	rs.pubsub.Unsubscribe(conn, channel)
+}
+
+func (rs *redHub) OnPublish(channel, message string) {
+	rs.pubsub.Publish(channel, message)
 }
