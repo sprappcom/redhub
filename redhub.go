@@ -23,6 +23,10 @@ type Conn struct {
 	gnet.Conn
 }
 
+func (c *Conn) Unwrap() gnet.Conn {
+	return c.Conn
+}
+
 type Options struct {
 	Multicore        bool
 	LockOSThread     bool
@@ -119,7 +123,7 @@ func (rs *redHub) OnTraffic(c gnet.Conn) gnet.Action {
 			} else {
 				cb.command = cb.command[1:]
 			}
-			cmd.Conn = &Conn{c} // Correctly cast the connection
+			cmd.Conn = &Conn{Conn: c} // Correctly cast the connection
 			out, status = rs.handler(cmd, out)
 			c.Write(out)
 			switch status {
