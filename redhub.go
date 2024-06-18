@@ -178,7 +178,7 @@ func (ps *PubSub) Subscribe(conn *Conn, channel string) {
 	conn.Write(resp.AppendArray(nil, 2))
 	conn.Write(resp.AppendBulkString(nil, "subscribe"))
 	conn.Write(resp.AppendBulkString(nil, channel))
-	conn.Write(resp.AppendInt(nil, len(ps.chans[channel])))
+	conn.Write(resp.AppendInt(nil, int64(len(ps.chans[channel])))) // Cast to int64
 	conn.Flush()
 }
 
