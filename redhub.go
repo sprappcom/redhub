@@ -179,12 +179,12 @@ func (ps *PubSub) Subscribe(conn *Conn, channel string) {
 	}
 	if _, exists := ps.chans[channel][conn]; !exists {
 		ps.chans[channel][conn] = struct{}{}
-		conn.Write(resp.AppendArray(nil, 3))
-		conn.Write(resp.AppendBulkString(nil, "subscribe"))
-		conn.Write(resp.AppendBulkString(nil, channel))
-		conn.Write(resp.AppendInt(nil, int64(len(ps.chans[channel])))) // Cast to int64
-		conn.Flush()
 	}
+	conn.Write(resp.AppendArray(nil, 3))
+	conn.Write(resp.AppendBulkString(nil, "subscribe"))
+	conn.Write(resp.AppendBulkString(nil, channel))
+	conn.Write(resp.AppendInt(nil, 1)) // Set the count to 1
+	conn.Flush()
 }
 
 func (ps *PubSub) Unsubscribe(conn *Conn, channel string) {
@@ -201,7 +201,7 @@ func (ps *PubSub) Unsubscribe(conn *Conn, channel string) {
 	conn.Write(resp.AppendArray(nil, 3))
 	conn.Write(resp.AppendBulkString(nil, "unsubscribe"))
 	conn.Write(resp.AppendBulkString(nil, channel))
-	conn.Write(resp.AppendInt(nil, int64(len(ps.chans[channel]))))
+	conn.Write(resp.AppendInt(nil, int64(len(conns))))
 	conn.Flush()
 }
 
